@@ -1,0 +1,9 @@
+#!/bin/bash
+
+qemu-system-arm \
+  -M raspi2b \
+  -kernel out/arch/arm/boot/zImage \
+  -dtb out/arch/arm/boot/dts/broadcom/bcm2709-rpi-2-b.dtb \
+  -initrd build/initramfs.cpio.gz \
+  -append "console=ttyAMA0 rdinit=/init" \
+  -nographic

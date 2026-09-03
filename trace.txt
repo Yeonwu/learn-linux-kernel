@@ -1,0 +1,129 @@
+# tracer: function
+#
+# entries-in-buffer/entries-written: 37/37   #P:4
+#
+#                                _-----=> irqs-off/BH-disabled
+#                               / _----=> need-resched
+#                              | / _---=> hardirq/softirq
+#                              || / _--=> preempt-depth
+#                              ||| / _-=> migrate-disable
+#                              |||| /     delay
+#           TASK-PID     CPU#  |||||  TIMESTAMP  FUNCTION
+#              | |         |   |||||     |         |
+              sh-78      [002] d....    13.351499: sched_switch: prev_comm=sh prev_pid=78 prev_prio=120 prev_state=D ==> next_comm=swapper/2 next_pid=0 next_prio=120
+          <idle>-0       [000] dnh..    13.351541: irq_handler_exit: irq=19 ret=handled
+          <idle>-0       [000] d....    13.352256: sched_switch: prev_comm=swapper/0 prev_pid=0 prev_prio=120 prev_state=R ==> next_comm=sh next_pid=88 next_prio=120
+          <idle>-0       [002] dnh..    13.353081: irq_handler_exit: irq=20 ret=handled
+          <idle>-0       [002] d....    13.353117: sched_switch: prev_comm=swapper/2 prev_pid=0 prev_prio=120 prev_state=R ==> next_comm=sh next_pid=78 next_prio=120
+              sh-78      [002] d....    13.353323: sched_switch: prev_comm=sh prev_pid=78 prev_prio=120 prev_state=S ==> next_comm=swapper/2 next_pid=0 next_prio=120
+          <idle>-0       [002] d.h..    13.358225: irq_handler_exit: irq=196 ret=handled
+          <idle>-0       [001] d.h..    13.358267: irq_handler_exit: irq=196 ret=handled
+             cat-88      [000] d.h..    13.358286: irq_handler_exit: irq=196 ret=handled
+          <idle>-0       [003] d.h..    13.358344: irq_handler_exit: irq=20 ret=handled
+             cat-88      [000] d....    13.358835: rpi_get_interrupt_info+0xc/0x58 <-show_interrupts+0x278/0x38c
+             cat-88      [000] d....    13.359363: <stack trace>
+ => rpi_get_interrupt_info+0x10/0x58
+ => show_interrupts+0x278/0x38c
+ => seq_read_iter+0x390/0x52c
+ => proc_reg_read_iter+0x8c/0xb4
+ => copy_splice_read+0x18c/0x2f4
+ => splice_direct_to_actor+0xac/0x2a4
+ => do_splice_direct+0x8c/0xcc
+ => do_sendfile+0x38c/0x420
+ => sys_sendfile64+0x110/0x11c
+ => ret_fast_syscall+0x0/0x54
+             cat-88      [000] d....    13.359680: rpi_get_interrupt_info+0x1c/0x58: [cat] 50: 3f00b880.mailbox, irq_handler: bcm2835_mbox_irq+0x0/0x84 
+             cat-88      [000] d....    13.359800: rpi_get_interrupt_info+0xc/0x58 <-show_interrupts+0x278/0x38c
+             cat-88      [000] d....    13.359812: <stack trace>
+ => rpi_get_interrupt_info+0x10/0x58
+ => show_interrupts+0x278/0x38c
+ => seq_read_iter+0x390/0x52c
+ => proc_reg_read_iter+0x8c/0xb4
+ => copy_splice_read+0x18c/0x2f4
+ => splice_direct_to_actor+0xac/0x2a4
+ => do_splice_direct+0x8c/0xcc
+ => do_sendfile+0x38c/0x420
+ => sys_sendfile64+0x110/0x11c
+ => ret_fast_syscall+0x0/0x54
+             cat-88      [000] d....    13.359818: rpi_get_interrupt_info+0x1c/0x58: [cat] 73: bcm2708_fb DMA, irq_handler: bcm2708_fb_dma_irq+0x0/0x38 
+             cat-88      [000] d....    13.359826: rpi_get_interrupt_info+0xc/0x58 <-show_interrupts+0x278/0x38c
+             cat-88      [000] d....    13.359835: <stack trace>
+ => rpi_get_interrupt_info+0x10/0x58
+ => show_interrupts+0x278/0x38c
+ => seq_read_iter+0x390/0x52c
+ => proc_reg_read_iter+0x8c/0xb4
+ => copy_splice_read+0x18c/0x2f4
+ => splice_direct_to_actor+0xac/0x2a4
+ => do_splice_direct+0x8c/0xcc
+ => do_sendfile+0x38c/0x420
+ => sys_sendfile64+0x110/0x11c
+ => ret_fast_syscall+0x0/0x54
+             cat-88      [000] d....    13.359838: rpi_get_interrupt_info+0x1c/0x58: [cat] 75: DMA IRQ, irq_handler: bcm2835_dma_callback+0x0/0x168 
+             cat-88      [000] d....    13.359848: rpi_get_interrupt_info+0xc/0x58 <-show_interrupts+0x278/0x38c
+             cat-88      [000] d....    13.359856: <stack trace>
+ => rpi_get_interrupt_info+0x10/0x58
+ => show_interrupts+0x278/0x38c
+ => seq_read_iter+0x390/0x52c
+ => proc_reg_read_iter+0x8c/0xb4
+ => copy_splice_read+0x18c/0x2f4
+ => splice_direct_to_actor+0xac/0x2a4
+ => do_splice_direct+0x8c/0xcc
+ => do_sendfile+0x38c/0x420
+ => sys_sendfile64+0x110/0x11c
+ => ret_fast_syscall+0x0/0x54
+             cat-88      [000] d....    13.359859: rpi_get_interrupt_info+0x1c/0x58: [cat] 89: dwc_otg, irq_handler: dwc_otg_common_irq+0x0/0x20 
+             cat-88      [000] d....    13.359896: rpi_get_interrupt_info+0xc/0x58 <-show_interrupts+0x278/0x38c
+             cat-88      [000] d....    13.359905: <stack trace>
+ => rpi_get_interrupt_info+0x10/0x58
+ => show_interrupts+0x278/0x38c
+ => seq_read_iter+0x390/0x52c
+ => proc_reg_read_iter+0x8c/0xb4
+ => copy_splice_read+0x18c/0x2f4
+ => splice_direct_to_actor+0xac/0x2a4
+ => do_splice_direct+0x8c/0xcc
+ => do_sendfile+0x38c/0x420
+ => sys_sendfile64+0x110/0x11c
+ => ret_fast_syscall+0x0/0x54
+             cat-88      [000] d....    13.359907: rpi_get_interrupt_info+0x1c/0x58: [cat] 113: mmc0, irq_handler: bcm2835_irq+0x0/0x230 
+             cat-88      [000] d....    13.359913: rpi_get_interrupt_info+0xc/0x58 <-show_interrupts+0x278/0x38c
+             cat-88      [000] d....    13.359921: <stack trace>
+ => rpi_get_interrupt_info+0x10/0x58
+ => show_interrupts+0x278/0x38c
+ => seq_read_iter+0x390/0x52c
+ => proc_reg_read_iter+0x8c/0xb4
+ => copy_splice_read+0x18c/0x2f4
+ => splice_direct_to_actor+0xac/0x2a4
+ => do_splice_direct+0x8c/0xcc
+ => do_sendfile+0x38c/0x420
+ => sys_sendfile64+0x110/0x11c
+ => ret_fast_syscall+0x0/0x54
+             cat-88      [000] d....    13.359924: rpi_get_interrupt_info+0x1c/0x58: [cat] 114: uart-pl011, irq_handler: pl011_int+0x0/0x640 
+             cat-88      [000] d....    13.359980: rpi_get_interrupt_info+0xc/0x58 <-show_interrupts+0x278/0x38c
+             cat-88      [000] d....    13.359988: <stack trace>
+ => rpi_get_interrupt_info+0x10/0x58
+ => show_interrupts+0x278/0x38c
+ => seq_read_iter+0x390/0x52c
+ => proc_reg_read_iter+0x8c/0xb4
+ => copy_splice_read+0x18c/0x2f4
+ => splice_direct_to_actor+0xac/0x2a4
+ => do_splice_direct+0x8c/0xcc
+ => do_sendfile+0x38c/0x420
+ => sys_sendfile64+0x110/0x11c
+ => ret_fast_syscall+0x0/0x54
+             cat-88      [000] d....    13.359991: rpi_get_interrupt_info+0x1c/0x58: [cat] 196: arch_timer, irq_handler: arch_timer_handler_virt+0x0/0x38 
+             cat-88      [000] d....    13.359998: rpi_get_interrupt_info+0xc/0x58 <-show_interrupts+0x278/0x38c
+             cat-88      [000] d....    13.360006: <stack trace>
+ => rpi_get_interrupt_info+0x10/0x58
+ => show_interrupts+0x278/0x38c
+ => seq_read_iter+0x390/0x52c
+ => proc_reg_read_iter+0x8c/0xb4
+ => copy_splice_read+0x18c/0x2f4
+ => splice_direct_to_actor+0xac/0x2a4
+ => do_splice_direct+0x8c/0xcc
+ => do_sendfile+0x38c/0x420
+ => sys_sendfile64+0x110/0x11c
+ => ret_fast_syscall+0x0/0x54
+             cat-88      [000] d....    13.360009: rpi_get_interrupt_info+0x1c/0x58: [cat] 198: arm-pmu, irq_handler: armpmu_dispatch_irq+0x0/0x88 
+          <idle>-0       [002] dnh..    13.363594: irq_handler_exit: irq=20 ret=handled
+          <idle>-0       [002] d....    13.363618: sched_switch: prev_comm=swapper/2 prev_pid=0 prev_prio=120 prev_state=R ==> next_comm=sh next_pid=78 next_prio=120
+             cat-88      [000] d....    13.363768: sched_switch: prev_comm=cat prev_pid=88 prev_prio=120 prev_state=X ==> next_comm=swapper/0 next_pid=0 next_prio=120

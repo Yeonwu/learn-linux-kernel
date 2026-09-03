@@ -1,2 +1,14 @@
-linux-kernel-master/*
-out/*
+linux-kernel-master/
+out/
+busybox/
+rootfs/bin/
+rootfs/dev/
+rootfs/etc/
+rootfs/proc/
+rootfs/sbin/
+rootfs/sys/
+rootfs/tmp/
+rootfs/usr/
+rootfs/linuxrc
+linux/
+build/
