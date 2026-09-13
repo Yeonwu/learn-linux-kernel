@@ -1,11 +1,7 @@
 make[1]: Entering directory '/home/yeonwu/Repos/learn-linux-kernel/out'
   GEN     Makefile
   CALL    /home/yeonwu/Repos/learn-linux-kernel/linux/scripts/checksyscalls.sh
-  CC      kernel/irq/proc.o
-/home/yeonwu/Repos/learn-linux-kernel/linux/kernel/irq/proc.c:450:15: warning: no previous prototype for ‘rpi_get_interrupt_info’ [-Wmissing-prototypes]
-  450 | noinline void rpi_get_interrupt_info(struct irqaction *action_p) {
-      |               ^~~~~~~~~~~~~~~~~~~~~~
-  AR      kernel/irq/built-in.a
+  CC      kernel/workqueue.o
   AR      kernel/built-in.a
   AR      built-in.a
   AR      vmlinux.a

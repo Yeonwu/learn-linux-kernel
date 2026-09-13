@@ -1,0 +1,78 @@
+#!/bin/bash
+
+set -euo pipefail
+
+echo "configure build output path"
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+KERNEL_TOP_PATH="$(cd -- "$SCRIPT_DIR/.." && pwd -P)"
+OUTPUT="$KERNEL_TOP_PATH/out"
+echo "$OUTPUT"
+
+KERNEL=kernel7
+BUILD_LOG="$KERNEL_TOP_PATH/rpi_build_log.txt"
+ROOTFS_MOUNT="$KERNEL_TOP_PATH/build/rootfs-mnt"
+ROOTFS_IMAGE="$KERNEL_TOP_PATH/build/rootfs.ext4"
+ROOTFS_MOUNT="$KERNEL_TOP_PATH/build/rootfs-mnt"
+ROOTFS_MOUNTED_BY_SCRIPT=0
+
+PREPROCESS_FILE="${1:-}"
+
+if [[ -n "$PREPROCESS_FILE" ]]; then
+	echo "build preprocessed file: $PREPROCESS_FILE"
+fi
+
+cleanup() {
+	if [[ "$ROOTFS_MOUNTED_BY_SCRIPT" -eq 1 ]] &&
+	   mountpoint -q "$ROOTFS_MOUNT"; then
+		echo "unmount rootfs"
+		sync
+		sudo umount "$ROOTFS_MOUNT"
+	fi
+}
+
+trap cleanup EXIT INT TERM
+
+if mountpoint -q "$ROOTFS_MOUNT"; then
+	echo "rootfs is already mounted: $ROOTFS_MOUNT"
+else
+	echo "mount rootfs"
+	mkdir -p "$ROOTFS_MOUNT"
+	sudo mount -o loop "$ROOTFS_IMAGE" "$ROOTFS_MOUNT"
+	ROOTFS_MOUNTED_BY_SCRIPT=1
+fi
+
+echo "move kernel source"
+cd "$KERNEL_TOP_PATH/linux"
+
+echo "make defconfig"
+make O=$OUTPUT \
+	ARCH=$ARCH \
+	CROSS_COMPILE=$CROSS_COMPILE \
+	bcm2709_defconfig
+
+echo "kernel build"
+if [[ -z "$PREPROCESS_FILE" ]]; then
+	make -j"$(nproc)" O="$OUTPUT" \
+		ARCH=$ARCH \
+		CROSS_COMPILE=$CROSS_COMPILE \
+		zImage modules dtbs 2>&1 | tee "$BUILD_LOG"
+else
+	make "$PREPROCESS_FILE" -j"$(nproc)" O="$OUTPUT" \
+		ARCH=$ARCH \
+		CROSS_COMPILE=$CROSS_COMPILE \
+		zImage modules dtbs 2>&1 | tee "$BUILD_LOG"
+fi
+
+if mountpoint -q "$ROOTFS_MOUNT"; then
+	echo "install kernel modules into rootfs"
+	sudo make O="$OUTPUT" \
+		ARCH="$ARCH" \
+		CROSS_COMPILE="$CROSS_COMPILE" \
+		modules_install \
+		INSTALL_MOD_PATH="$ROOTFS_MOUNT"
+else
+	echo "skip modules_install: $ROOTFS_MOUNT is not mounted"
+fi
+
+echo "Done"

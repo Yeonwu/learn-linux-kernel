@@ -1,6 +1,8 @@
 # Linux Kernel 공부 환경 세팅
 
-Raspberry Pi 2용 Linux Kernel을 직접 빌드하고, QEMU에서 부팅한 뒤, 커널 내부의 인터럽트 처리 흐름을 ftrace로 확인하기 위한 환경을 만들었다.
+Raspberry Pi 2용 Linux Kernel을 직접 빌드하고, QEMU에서 Debian 사용자 공간과 함께 부팅한 뒤, 커널 내부의 인터럽트 처리 흐름을 ftrace로 확인하기 위한 환경을 만들었다.
+
+처음에는 BusyBox 기반의 작은 initramfs를 사용했다. 그러나 이후 실습에서는 `systemd`, `ps`, `ssh`, 컴파일러와 각종 디버깅 도구 등 다양한 사용자 프로그램이 필요했다. 필요한 기능을 매번 BusyBox에 추가하는 대신 패키지 관리자를 사용할 수 있도록 사용자 공간을 Debian으로 변경했다. 커널은 이 저장소에서 직접 빌드한 것을 사용하고, 사용자 공간만 Debian root filesystem을 사용한다.
 
 현재 환경은 다음과 같이 구성되어 있다.
 
@@ -9,7 +11,7 @@ Target: Raspberry Pi 2 (`bcm2709`) |
 Architecture: ARM 32-bit (`arm`) |
 Cross compiler: `arm-linux-gnueabihf-` |
 Kernel output: `out/` |
-Root filesystem: BusyBox 기반 initramfs |
+Root filesystem: Debian ARMHF (`build/rootfs.ext4`) |
 Emulator: QEMU `raspi2b` |
 Trace: ftrace function tracer + IRQ/scheduler events
 
@@ -18,20 +20,19 @@ Trace: ftrace function tracer + IRQ/scheduler events
 ```text
 .
 ├── linux/                  # Linux Kernel source
-├── busybox/                # BusyBox source와 빌드 결과
-├── rootfs/                 # initramfs에 들어갈 파일
-│   ├── init                # init 프로세스
-│   └── trace.sh            # ftrace 수집 스크립트
 ├── out/                    # Kernel 빌드 결과
-├── build/                  # initramfs 이미지
+├── build/
+│   └── rootfs.ext4         # Debian ARMHF root filesystem 이미지
 ├── bin/                    # ARM 빌드 도구 경로
+├── qemu-share/             # 게스트에서 사용할 실습 스크립트와 로그
+├── scripts/
+│   ├── boot                # QEMU 실행
+│   └── update_kernel       # Kernel 빌드와 module 설치
 ├── .envrc                  # 빌드 환경 변수
-├── build_rpi_kernel.sh     # Kernel 빌드
-├── build_initramfs.sh      # initramfs 생성
-└── run_pi                  # QEMU 실행
+└── docs/                   # 실습 문서
 ```
 
-`linux/`, `busybox/`, `rootfs/`, `out/`은 gitignore 처리했다.
+`linux/`, `out/`, `build/`, `qemu-share/` 등 소스와 빌드 결과 및 실습 로그는 gitignore 처리했다.
 
 ## 1. ARM 빌드 환경 설정
 
@@ -41,6 +42,7 @@ Trace: ftrace function tracer + IRQ/scheduler events
 #!/bin/bash
 
 PATH_add "$PWD/bin"
+PATH_add "$PWD/scripts"
 
 export ARCH=arm
 export CROSS_COMPILE=arm-linux-gnueabihf-
@@ -59,28 +61,26 @@ arm-linux-gnueabihf-gcc 13.3.0
 qemu-system-arm         8.2.2
 ```
 
-책에서는 라즈비안 4.19 버전을 사용했으나, 빌드 도구 버전을 맞추기 어려워 [6.18 버전](https://github.com/raspberrypi/linux/tree/rpi-6.18.y)을 사용했다. clone 후 `build_rpi_kernel.sh` 스크립트를 실행해 커널을 빌드할 수 있다.
+책에서는 라즈비안 4.19 버전을 사용했으나, 빌드 도구 버전을 맞추기 어려워 [6.18 버전](https://github.com/raspberrypi/linux/tree/rpi-6.18.y)을 사용했다. clone 후 `update_kernel` 스크립트를 실행해 커널을 빌드할 수 있다.
 
-## 2. BusyBox로 initramfs 만들기
+## 2. Debian 사용자 공간 준비하기
 
-Kernel만 부팅하면 사용할 사용자 공간이 없기 때문에 BusyBox를 넣은 작은 root filesystem을 준비한다.
-`rootfs/init`은 가장 먼저 필요한 가상 파일 시스템을 마운트하고 shell을 실행한다.
+Kernel만으로는 셸이나 일반 명령을 실행할 수 없으므로 별도의 사용자 공간이 필요하다. RMHF용 Debian root filesystem을 ext4 이미지로 준비하여 다음 경로에 둔다.
 
-```sh
-mount -t proc proc /proc
-mount -t sysfs sysfs /sys
-mount -t devtmpfs devtmpfs /dev
-
-exec /bin/sh
+```text
+build/rootfs.ext4
 ```
 
-initramfs 이미지는 다음 명령으로 만든다.
+QEMU는 이 이미지를 SD 장치로 연결하고, 직접 빌드한 Kernel은 `/dev/mmcblk0`을 root filesystem으로 마운트한다. Debian의 init system이 PID 1로 시작되며, 가상 파일 시스템 마운트와 서비스 시작도 Debian 환경에서 처리한다.
+
+따라서 실습에 필요한 사용자 프로그램은 게스트 Debian 안에서 `apt`로 설치할 수 있다.
 
 ```bash
-./build_initramfs.sh
+sudo apt update
+sudo apt install <필요한-패키지>
 ```
 
-스크립트는 `rootfs/` 전체를 `newc` 형식의 cpio archive로 묶은 뒤 gzip으로 압축하여 `build/initramfs.cpio.gz`를 생성한다.
+이미지 안의 Kernel module은 빌드한 Kernel 버전과 일치해야 한다. 저장소 루트에서 `update_kernel`을 실행하면 `rootfs.ext4`를 임시 마운트하고, Kernel을 빌드한 뒤 `modules_install`로 module을 이미지의 `/lib/modules/` 아래에 설치한다.
 
 ## 3. Raspberry Pi 2용 Kernel 빌드
 
@@ -103,33 +103,20 @@ make -j"$(nproc)" O=../out \
   zImage modules dtbs
 ```
 
-반복해서 실행할 때는 저장소 루트의 스크립트를 사용한다.
+반복해서 실행할 때는 저장소 루트에서 `update_kernel`을 사용한다.
 
 ```bash
-./build_rpi_kernel.sh
+update_kernel
 ```
 
-특정 파일만 다시 전처리하거나 빌드해야 하는 경우에는 인자로 make target을
-넘길 수 있다.
-
-```bash
-./build_rpi_kernel.sh path/to/file.i
-```
-
-빌드 로그는 `rpi_build_log.txt`에 저장한다. 현재 로그에서 다음 결과를
-확인했다.
-
-```text
-Kernel: arch/arm/boot/Image is ready
-Kernel: arch/arm/boot/zImage is ready
-```
+빌드 로그는 `rpi_build_log.txt`에 저장한다.
 
 ## 4. QEMU에서 Kernel 부팅하기
 
-빌드된 Kernel, Raspberry Pi 2 device tree, initramfs를 QEMU에 넘긴다.
+빌드된 Kernel과 Raspberry Pi 2 device tree를 사용하고, Debian ext4 이미지를 SD 장치로 연결하여 QEMU를 실행한다.
 
 ```bash
-./run_pi
+boot
 ```
 
 실제로 실행되는 명령은 다음과 같다.
@@ -139,18 +126,21 @@ qemu-system-arm \
   -M raspi2b \
   -kernel out/arch/arm/boot/zImage \
   -dtb out/arch/arm/boot/dts/broadcom/bcm2709-rpi-2-b.dtb \
-  -initrd build/initramfs.cpio.gz \
-  -append "console=ttyAMA0 rdinit=/init" \
+  -drive "file=build/rootfs.ext4,format=raw,if=sd" \
+  -netdev user,id=net0,hostfwd=tcp:127.0.0.1:2222-:22 \
+  -device usb-net,netdev=net0 \
+  -append "console=ttyAMA0 root=/dev/mmcblk0 rootfstype=ext4 rw rootwait dwc_otg.lpm_enable=0 dwc_otg.fiq_fsm_enable=0" \
   -nographic
 ```
 
-`-nographic`를 사용했기 때문에 QEMU의 serial console이 현재 터미널에 그대로 출력된다. 정상적으로 부팅되면 다음과 같은 initramfs shell이 나온다.
+각 옵션의 역할은 다음과 같다.
 
-```text
-================================
- BusyBox initramfs booted
-================================
-```
+- `-drive ...if=sd`: `rootfs.ext4`를 Raspberry Pi의 SD 장치로 연결한다.
+- `root=/dev/mmcblk0`: 연결한 ext4 이미지를 root filesystem으로 사용한다.
+- `-nographic`: serial console을 현재 터미널에 연결한다. 부팅 후 Debian 로그인 프롬프트에서 실습한다.
+- `hostfwd=...2222-:22`: 게스트에서 SSH 서버를 실행하고 있다면 호스트의 `127.0.0.1:2222`를 게스트의 22번 포트로 전달한다.
+
+QEMU 종료는 serial console에서 `Ctrl-a x`를 입력한다.
 
 ## 5. 인터럽트 정보 출력 지점에 trace_printk 추가
 
@@ -175,22 +165,18 @@ noinline void rpi_get_interrupt_info(struct irqaction *action_p) {
 
 ## 6. ftrace로 실행 흐름 확인하기
 
-부팅한 QEMU 안에서 다음을 실행한다.
+부팅한 QEMU의 Debian 환경에서 root 권한으로 tracefs를 마운트하고 ftrace 설정을 적용한다. 저장소의 `qemu-share/trace.sh`가 이 과정을 자동화한다.
 
 ```bash
+mount -t tracefs nodev /sys/kernel/tracing
 ./trace.sh
 ```
 
-initramfs는 `rootfs/`의 내용을 루트(`/`)로 풀기 때문에, QEMU 안에서는 스크립트 경로는 `/trace.sh`이다.
-
-QEMU에서 제공하는 호스트-게스트 공유 폴더는 실시간 공유가 아니기 때문에, 공유 폴더를 만드는 대신 `gzip`으로 압축한 후 `base64`로 인코딩하여 터미널에 출력, 출력 결과를 호스트에서 다시 디코팅/압축해제하였다.
+`qemu-share/`는 QEMU에 자동으로 공유되는 디렉터리가 아니다. 스크립트를 사용하려면 serial console에 내용을 붙여 넣거나, 게스트의 SSH 서버와 네트워크가 준비된 경우 호스트의 2222번 포트를 통해 복사한다.
 
 ```bash
-# 게스트
-cat ftrace_log.c | gzip | base64
-
-# 호스트
-base64 -d ftrace_log.b64 | gzip -d > trace.txt
+scp -P 2222 qemu-share/trace.sh <user>@127.0.0.1:~/
+scp -P 2222 <user>@127.0.0.1:~/trace.log qemu-share/trace.log
 ```
 
 

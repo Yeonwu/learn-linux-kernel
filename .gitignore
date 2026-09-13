@@ -1,14 +1,8 @@
 linux-kernel-master/
 out/
 busybox/
-rootfs/bin/
-rootfs/dev/
-rootfs/etc/
-rootfs/proc/
-rootfs/sbin/
-rootfs/sys/
-rootfs/tmp/
-rootfs/usr/
-rootfs/linuxrc
+rootfs/
+rootfs-debian/
 linux/
 build/
+compile_commands.json

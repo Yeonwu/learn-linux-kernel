@@ -1,0 +1,16 @@
+#!/bin/bash
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+KERNEL_TOP_PATH="$(cd -- "$SCRIPT_DIR/.." && pwd -P)"
+
+qemu-system-arm \
+  -M raspi2b \
+  -kernel "$KERNEL_TOP_PATH/out/arch/arm/boot/zImage" \
+  -dtb "$KERNEL_TOP_PATH/out/arch/arm/boot/dts/broadcom/bcm2709-rpi-2-b.dtb" \
+  -drive "file=$KERNEL_TOP_PATH/build/rootfs.ext4,format=raw,if=sd" \
+  -netdev user,id=net0,hostfwd=tcp:127.0.0.1:2222-:22 \
+  -device usb-net,netdev=net0 \
+  -append "console=ttyAMA0 root=/dev/mmcblk0 rootfstype=ext4 rw rootwait dwc_otg.lpm_enable=0 dwc_otg.fiq_fsm_enable=0" \
+  -nographic
