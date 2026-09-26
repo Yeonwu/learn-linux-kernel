@@ -191,3 +191,261 @@ Disassembly of section .text:
 8012d520 <pid_child_should_wake>:
 8012d520:       e52de004        push    {lr}            @ (str lr, [sp, #-4]!)
 ```
+
+# kthread_create
+
+## 커널 스레드 생성 과정
+
+kthread_create_list를 조작할 때는 락을 걸고 진행한다.
+
+1. kthread_create_on_node가 kthread_create_list에 커널 스레드 생성 요청을 추가한 다음, kthreadd를 깨운다.
+2. 깨어난 kthreadd가 kthread_create_list에서 각 요청에 대해 create_kthread를 호출한다.
+3. create_kthread가 kernel_thread를 호출해 커널 스레드를 생성한다.
+4. kernel_thread는 kernel_clone을 호출해 프로세스를 생성한다.
+5. kernel_clone은 copy_process를 통해 부모 프로세스 리소스를 복사한다.
+6. 이후 wake_up_new_task를 통해 생성한 프로세스를 깨운다(run queue에 추가한다).
+
+## 왜 커널 "프로세스"가 아니라 커널 "스레드"라고 부를까?
+
+프로세스의 정의를 생각해보면 이유를 알 수 있다. 프로세스 > 독립된 메모리 주소 공간 + 실행 컨텍스트.
+커널 스레드는 독립된 메모리 공간을 갖지 않고, 커널 공간의 메모리를 다 같이 공유하며 실행된다.
+
+
+
+## likely, unlikey
+
+```c
+void __noreturn do_exit(long code)
+{
+	...
+		kthread = tsk_is_kthread(tsk);
+	if (unlikely(kthread))
+		kthread_do_exit(kthread, code);
+}
+```
+
+```c
+# define likely(x)	__builtin_expect(!!(x), 1)
+# define unlikely(x)	__builtin_expect(!!(x), 0)
+```
+
+자주 등장하는 매크로이므로 의미를 알아두면 좋을 것 같다. 뜻은 단어 그대로, 해당 조건이 True/False일 확률이 매우 높다는 뜻이다.
+__builtin_expect(expr, expected_value)는 GCC 내장 함수로, "이 조건식의 결과는 보통 expected_value일 것" 이라고 컴파일러에게 알려준다.
+컴파일러는 그에 맞게 기본 경로를 최적화한다.
+
+```
+# include <stdio.h>
+
+# define likely(x)      __builtin_expect(!!(x), 1)
+# define unlikely(x)    __builtin_expect(!!(x), 0)
+
+void aaa() {
+    printf("aaaa\n");
+}
+
+void bbb() {
+    printf("bbbb\n");
+}
+
+int main() {
+    int i;
+    scanf("%d", &i);
+    if (unlikely(i))
+        aaa();
+    else
+        bbb();
+    return 0;
+}
+```
+
+```
+pi@rpi-qemu:~$ gcc -O2 -S -o expect.s ./expect.c
+pi@rpi-qemu:~$ cat expect.s
+
+...
+.LC0:
+	.ascii	"aaaa\000"
+...
+.LC1:
+	.ascii	"bbbb\000"
+...
+main:
+...
+	bl	__isoc99_scanf(PLT)
+	ldr	r3, [sp, #4]
+	cbnz	r3, .L12  // Compare and Branch if Non-Zero, 즉 i가 0이 아니라면 브랜치.
+	ldr	r0, .L13+4
+...
+.L12:
+	ldr	r0, .L13+8
+...
+.L13:
+	.word	.LC2-(.LPIC2+4)
+	.word	.LC1-(.LPIC4+4)
+	.word	.LC0-(.LPIC3+4)
+```
+
+unlikely 대신 likely 사용했을 경우 / 아예 사용하지 않았을 경우
+
+```
+main:
+...
+	bl	__isoc99_scanf(PLT)
+	ldr	r3, [sp, #4]
+	cbz	r3, .L9 // Compare and Branch if Zero, 즉 i가 1이라면 브랜치.
+...
+```
+
+## ERR_PTR
+
+리턴하는 값이 pointer 형식일 때, 에러를 뜻하는 음수 값을 포인터 형식으로 감싸서 리턴한다.
+함수 호출자는 IS_ERR 매크로를 사용해서 에러 여부를 확인해야 한다.
+
+```c
+
+struct task_struct *some_function()
+	...
+	if (!create) 
+		return ERR_PTR(-ENOMEM);
+...
+
+struct task_struct *foo = some_function();
+if (IS_ERR(foo))
+	// handle error
+```
+
+## kthread_create > kthread_create_on_node
+
+왜 kthread_create을 #define으로 한번 감싸면서 kthread_create_on_node의 node 인자를 NUMA_NO_NODE로 고정했을까?
+
+```c
+// linux/include/linux/kthread.h:45-46
+#define kthread_create(threadfn, data, namefmt, arg...) \
+	kthread_create_on_node(threadfn, data, NUMA_NO_NODE, namefmt, ##arg)
+```
+
+NUMA는 Non-Uniform Memory Access의 약자로, NUMA node는 cpu와 메모리로 구성된다. 이 때, 같은 node 안의 메모리에 접근이 빠르고, 다른 node 메모리 접근은 느리다.
+사용자가 해당 커널 스레드가 특정 node에서만 실행되는 것을 알고 있다면, 해당 node에 할당해 최적화가 가능하다. 대부분의 경우 그렇지 않으므로 기본 인자로 NO_NODE를 준 것이다.
+
+# process 종료 과정
+
+## do_exit
+
+### 중복 종료 호출 확인 - 확인 책임이 do_exit()에서 각 호출 경로별로 분산됨.
+수행하는 이유 - do_exit의 작업은 대부분 free 작업, 해당 작업을 중복 수행하게 되면 문제가 생김.
+
+스레드가 종료되는 경로는 크게 4가지.
+
+1. 스스로 exit 호출
+2. 스레드 그룹에 대해 exit_group 호출
+3. 시그널(SIGKILL 등)
+4. oops/fault 등 커널 버그
+
+하나하나 따져보자.
+
+1. 스스로 exit() 호출: 중복 호출이 구조적으로 불가능함. do_exit은 리턴하지 않으므로, 스레드 실행 흐름으로 돌아와서 중복 호출할 수 없음.
+2. 스레드 그룹에서 do_group_exit 호출: 케이스를 나눠서 생각해보면 됌. 같은 그룹에 속한 스레드 1, 2가 있다고 가정.
+
+- 스레드 1과 2에서 동시에 do_exit_group 호출:
+같은 그룹 내 다른 스레드를 전부 종료하는 함수: zap_other_threads()는 SIGNAL_GROUP_EXIT가 활성화 되어 있지 않은 최초 1회에만 호출됨.
+```c
+// linux/kernel/exit.c:1106
+void __noreturn
+do_group_exit(int exit_code)
+{
+	...
+	spin_lock_irq(&sighand->siglock);
+	if (sig->flags & SIGNAL_GROUP_EXIT)
+		/* Another thread got here before we took the lock.  */
+		exit_code = sig->group_exit_code;
+	else if (sig->group_exec_task)
+		exit_code = 0;
+	else {
+		sig->group_exit_code = exit_code;
+		sig->flags = SIGNAL_GROUP_EXIT;
+		zap_other_threads(current);
+	}
+	spin_unlock_irq(&sighand->siglock);
+	...
+}
+```
+
+- 스레드 1에서 do_exit 호출, 종료 전 스레드 2에서 do_exit_group 호출.
+zap_other_threads는 exit_state인 스레드는 종료하지 않음.
+``` c
+// linux/kernel/signal.c:1337-1357
+int zap_other_threads(struct task_struct *p)
+{
+...
+	for_other_threads(p, t) {
+		task_clear_jobctl_pending(t, JOBCTL_PENDING_MASK);
+		count++;
+
+		/* Don't bother with already dead threads */
+		if (t->exit_state)
+			continue;
+		sigaddset(&t->pending.signal, SIGKILL);
+		signal_wake_up(t, 1);
+	}
+...
+}
+```
+t->exit_state은 do_exit에서 exit_notify 호출 시 값이 들어감.
+
+3. 시그널
+PF_EXITING 플래그가 켜져있으면 시그널을 보내지 않음. 애초에 do_exit은 no return이므로 스레드가 시그널을 받는 것도 불가능함.
+```c
+// linux/kernel/signal.c:286-287
+if (unlikely(fatal_signal_pending(task) || (task->flags & PF_EXITING)))
+	return false;
+```
+
+4. oops/fault
+oops 발생 시 커널은 make_task_dead 함수를 통해 스레드를 종료함.
+해당 함수에서는 다음과 같이 처리하여 do_exit이 중복 호출되지 않게 처리함.
+
+```c
+// linux/kernel/exit.c:1073-1082
+if (unlikely(tsk->flags & PF_EXITING)) {
+	pr_alert("Fixing recursive fault but reboot is needed!\n");
+	futex_exit_recursive(tsk);
+	tsk->exit_state = EXIT_DEAD;
+	refcount_inc(&tsk->rcu_users);
+	preempt_disable();
+	do_task_dead();
+}
+
+do_exit(signr);
+```
+
+# task_struct
+
+## container_of
+
+왜 사용하나? 설계상, 만약 구조체 전체 정보가 필요하다면 그걸 받아야하고, 특정 필드만 필요하면 해당 필드를 넘기는게 맞지 않을까?
+
+```c
+
+struct list_head {
+	struct list_head *next, *prev;
+};
+
+struct task_struct {
+	...
+	struct list_head		tasks;
+	...
+}
+```
+
+커널에서 특정 구조체를 손쉽게 리스트로 만들 수 있기 때문이다. 위와 같이 list_head 필드를 넣어두고, 연결해 놓으면, 나중에 container_of로 가져다 사용할 수 있다.
+이러한 구현의 장점은 리스트 관련 코드의 추상화, 재사용이다. 다음과 같은 순회 상황을 생각해보자.
+
+```c
+struct list_head *pos;
+list_for_each(pos, &task_list) {
+   ...
+}
+```
+만약 list_head를 사용하지 않고, task_struct 자체에 struct task_struct *prev, *next를 필드로 두었다면 list_for_each를 재사용 할 수 없었을 것이다.
+리스트 관련 코드는 리스트 로직만 관리하고, 해당 주소에 어떤 타입이 오는지는 상관하지 않는다.
+
