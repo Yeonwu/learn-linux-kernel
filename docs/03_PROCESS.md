@@ -449,3 +449,224 @@ list_for_each(pos, &task_list) {
 만약 list_head를 사용하지 않고, task_struct 자체에 struct task_struct *prev, *next를 필드로 두었다면 list_for_each를 재사용 할 수 없었을 것이다.
 리스트 관련 코드는 리스트 로직만 관리하고, 해당 주소에 어떤 타입이 오는지는 상관하지 않는다.
 
+## thread_info
+
+하드웨어 의존적인 아키텍처 별 추가 정보들을 저장한다. (선점 조건, 시그널, 레지스터 저장/로딩, 인터럽트 컨텍스트 여부)
+
+### thread_info에서 task_struct를 어떻게 참조하나?
+
+참조할 필요가 없다. 타입만 바꿔주면 된다.
+
+```c
+// linux/include/linux/sched.h:815-822
+struct task_struct {
+#ifdef CONFIG_THREAD_INFO_IN_TASK
+	/*
+	 * For reasons of header soup (see current_thread_info()), this
+	 * must be the first element of task_struct.
+	 */
+	struct thread_info		thread_info;
+#endif
+...
+}
+```
+
+위와 같이 thread_info는 task_struct의 첫번째 element로 들어가 있기 때문에,
+```c
+// linux/arch/arm/include/asm/thread_info.h:84-87
+static inline struct task_struct *thread_task(struct thread_info* ti)
+{
+	return (struct task_struct *)ti;
+}
+```
+포인터로 타입만 바꿔주면 된다.
+
+### `CONFIG_THREAD_INFO_IN_TASK`
+
+이전 커널에서는 프로세스 스택 최상단에 thread_info를 저장하고, thread_info에 task_struct 주소를 저장했다.
+이런 설계에는 장점(stack 시작 주소 = current)도 있었지만, 단점(stack overflow에 취약)도 있었기 때문에, 현재는 구조를 변경하였다.
+
+지금 구현에서는 어디에 저장되어 있을까?
+
+### 커널 메모리 레이아웃
+
+커널을 메모리를 다음과 같이 관리한다:
+
+```
+// linux/Documentation/arch/arm/memory.rst
+=============== =============== ===============================================
+Start		End		Use
+=============== =============== ===============================================
+ffff8000	ffffffff	copy_user_page / clear_user_page use.
+				For SA11xx and Xscale, this is used to
+				setup a minicache mapping.
+
+ffff4000	ffffffff	cache aliasing on ARMv6 and later CPUs.
+
+ffff1000	ffff7fff	Reserved.
+				Platforms must not use this address range.
+
+ffff0000	ffff0fff	CPU vector page.
+				The CPU vectors are mapped here if the
+				CPU supports vector relocation (control
+				register V bit.)
+
+fffe0000	fffeffff	XScale cache flush area.  This is used
+				in proc-xscale.S to flush the whole data
+				cache. (XScale does not have TCM.)
+
+fffe8000	fffeffff	DTCM mapping area for platforms with
+				DTCM mounted inside the CPU.
+
+fffe0000	fffe7fff	ITCM mapping area for platforms with
+				ITCM mounted inside the CPU.
+
+ffc80000	ffefffff	Fixmap mapping region.  Addresses provided
+				by fix_to_virt() will be located here.
+
+ffc00000	ffc7ffff	Guard region
+
+ff800000	ffbfffff	Permanent, fixed read-only mapping of the
+				firmware provided DT blob
+
+fee00000	feffffff	Mapping of PCI I/O space. This is a static
+				mapping within the vmalloc space.
+
+VMALLOC_START	VMALLOC_END-1	vmalloc() / ioremap() space.
+				Memory returned by vmalloc/ioremap will
+				be dynamically placed in this region.
+				Machine specific static mappings are also
+				located here through iotable_init().
+				VMALLOC_START is based upon the value
+				of the high_memory variable, and VMALLOC_END
+				is equal to 0xff800000.
+
+PAGE_OFFSET	high_memory-1	Kernel direct-mapped RAM region.
+				This maps the platforms RAM, and typically
+				maps all platform RAM in a 1:1 relationship.
+
+PKMAP_BASE	PAGE_OFFSET-1	Permanent kernel mappings
+				One way of mapping HIGHMEM pages into kernel
+				space.
+
+MODULES_VADDR	MODULES_END-1	Kernel module space
+				Kernel modules inserted via insmod are
+				placed here using dynamic mappings.
+
+TASK_SIZE	MODULES_VADDR-1	KASAn shadow memory when KASan is in use.
+				The range from MODULES_VADDR to the top
+				of the memory is shadowed here with 1 bit
+				per byte of memory.
+
+00001000	TASK_SIZE-1	User space mappings
+				Per-thread mappings are placed here via
+				the mmap() system call.
+
+00000000	00000fff	CPU vector page / null pointer trap
+				CPUs which do not support vector remapping
+				place their vector page here.  NULL pointer
+				dereferences by both the kernel and user
+				space are also caught via this mapping.
+=============== =============== ===============================================
+```
+
+...
+- vmalloc 영역: 흩어진 물리 페이지를 가상 주소로 연속이 되게 할당.
+- highmem/lowmem 영역: 물리 주소가 연속이 되도록 할당. 부팅 시 매핑, 이후 변경 없음.
+...
+
+task_struct는 크기가 고정되어 있는 작은 구조체이며, 운영체제가 자주 접근하기 때문에 lowmem 영역에 할당한다.
+커널 스택은 반대로 크기가 크고, overflow 위험이 있어 guard page가 필요하기 때문에 vmalloc 영역에 할당한다.
+
+alloc_task_struct_node 함수를 따라가보면, slab_alloc_node를 통해 메모리를 할당받고 있음을 확인할 수 있다.
+
+### slab
+lowmem에서도 기본 할당 크기는 page 단위임. task_struct 하나만 담으면 공간 낭비가 심하기 때문에, 할당받은 페이지를 캐시로 들고,
+이를 쪼개서 할당해주는 것이 slab.
+
+쪼개는 크기는 용도별로 미리 다양하게 정의해놓았음. slab 1개는 같은 사이즈의 slab object들로 쪼개서, slab freelist에서 관리함.
+slab object는 단순하게 사이즈 별로 자르고, 그 안에 다음 object의 시작 주소를 저장해놓은 형식임.
+
+cpu가 메모리 할당을 요구할 경우, 해당 cpu의 freelist에 slab freelist를 가져옴. cpu가 object를 해제할 경우, cpu freelist가 아닌 slab freelist로 반환됨.
+
+```c
+static struct task_struct *dup_task_struct(struct task_struct *orig, int node)
+{
+	...
+	tsk = alloc_task_struct_node(node);
+	...
+}
+
+// fork_init()에서 초기화됨.
+static struct kmem_cache *task_struct_cachep;
+
+static inline struct task_struct *alloc_task_struct_node(int node)
+{
+	return kmem_cache_alloc_node(task_struct_cachep, GFP_KERNEL, node);
+}
+
+// alloc_hooks는 메모리 할당 통계 집계를 위해 감싸놓은 매크로임.
+#define kmem_cache_alloc_node(...)	alloc_hooks(kmem_cache_alloc_node_noprof(__VA_ARGS__))
+
+void *kmem_cache_alloc_node_noprof(struct kmem_cache *s, gfp_t gfpflags, int node)
+{
+	void *ret = slab_alloc_node(s, NULL, gfpflags, node, _RET_IP_, s->object_size);
+
+	trace_kmem_cache_alloc(_RET_IP_, ret, s, gfpflags, node);
+
+	return ret;
+}
+
+static __fastpath_inline void *slab_alloc_node(struct kmem_cache *s, struct list_lru *lru,
+		gfp_t gfpflags, int node, unsigned long addr, size_t orig_size)
+{
+	void *object;
+	...
+	if (!object)
+		object = __slab_alloc_node(s, gfpflags, node, addr, orig_size);
+	...
+	return object;
+}
+
+static __always_inline void *__slab_alloc_node(struct kmem_cache *s,
+		gfp_t gfpflags, int node, unsigned long addr, size_t orig_size)
+{
+	struct kmem_cache_cpu *c;
+	struct slab *slab;
+	unsigned long tid;
+	void *object;
+
+	c = raw_cpu_ptr(s->cpu_slab);
+
+	// linked queue라고 생각하면 됌. head에서 pop해서 할당받아 사용.
+	object = c->freelist;
+	
+	if (!USE_LOCKLESS_FAST_PATH() ||
+	    unlikely(!object || !slab || !node_match(slab, node))) {
+		// 현재 slab에 남은 공간이 없을 경우 예외처리
+		// try slab freelist에서 가져오기
+		// if fails, 새로운 slab 생성
+		object = __slab_alloc(s, gfpflags, node, addr, c, orig_size);
+	} else {
+		void *next_object = get_freepointer_safe(s, object);
+		...
+	}
+
+	return object;
+}
+```
+
+# current 매크로
+
+사용한 빌드 설정 기준으로, 특정 레지스터에 현재 task_struct의 주소를 넣어두며, current 매크로 또한 해당 레지스터의 값을 읽어오는 것으로 작성되어 있음.
+
+```c
+// linux/arch/arm/include/asm/current.h:17-59
+static __always_inline __attribute_const__ struct task_struct *get_current(void)
+{
+	struct task_struct *cur;
+	asm("0:	mrc p15, 0, %0, c13, c0, 3			\n\t"
+	    : "=r"(cur));
+	return cur;
+}
+```
