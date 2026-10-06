@@ -51,17 +51,24 @@ make O=$OUTPUT \
 	CROSS_COMPILE=$CROSS_COMPILE \
 	bcm2709_defconfig
 
+echo "enable debug options"
+./scripts/config --file "$OUTPUT/.config" \
+	-d DEBUG_INFO_NONE \
+	-e DEBUG_INFO_DWARF_TOOLCHAIN_DEFAULT \
+	-e GDB_SCRIPTS
+make O=$OUTPUT ARCH=$ARCH CROSS_COMPILE=$CROSS_COMPILE olddefconfig
+
 echo "kernel build"
 if [[ -z "$PREPROCESS_FILE" ]]; then
 	make -j"$(nproc)" O="$OUTPUT" \
 		ARCH=$ARCH \
 		CROSS_COMPILE=$CROSS_COMPILE \
-		zImage modules dtbs 2>&1 | tee "$BUILD_LOG"
+		zImage modules dtbs scripts_gdb 2>&1 | tee "$BUILD_LOG"
 else
 	make "$PREPROCESS_FILE" -j"$(nproc)" O="$OUTPUT" \
 		ARCH=$ARCH \
 		CROSS_COMPILE=$CROSS_COMPILE \
-		zImage modules dtbs 2>&1 | tee "$BUILD_LOG"
+		zImage modules dtbs scripts_gdb 2>&1 | tee "$BUILD_LOG"
 fi
 
 if mountpoint -q "$ROOTFS_MOUNT"; then
